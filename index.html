@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <title>Visualização de Malha Logística</title>
+    
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <style>
+        :root { --primary: #2c3e50; --accent: #2980b9; --bg: #fdfdfd; }
+        body { font-family: 'Segoe UI', sans-serif; margin: 0; display: flex; height: 100vh; background: var(--bg); color: #333; overflow: hidden; }
+        
+        .sidebar { width: 320px; background: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; box-shadow: 2px 0 5px rgba(0,0,0,0.05); z-index: 1000; }
+        .header { background: var(--primary); color: white; padding: 20px; }
+        .controls { padding: 20px; flex-grow: 1; overflow-y: auto; }
+        
+        .control-group { margin-bottom: 20px; background: #f8f9fa; padding: 15px; border-radius: 8px; border: 1px solid #eee; }
+        .control-group h4 { margin: 0 0 10px 0; font-size: 0.9rem; color: #555; text-transform: uppercase; }
+        
+        label { display: block; font-size: 0.85rem; margin-bottom: 5px; font-weight: 600; }
+        input[type="file"], input[type="text"] { width: 100%; padding: 8px; margin-bottom: 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        input[type="range"] { width: 100%; margin-bottom: 12px; }
+        
+        button { width: 100%; padding: 10px; border: none; border-radius: 5px; font-weight: bold; cursor: pointer; transition: 0.2s; margin-bottom: 10px; color: white; }
+        .btn-plot { background: #2980b9; } .btn-plot:hover { background: #1f6391; }
+        .btn-go { background: #27ae60; padding: 8px; font-size: 13px; margin-bottom: 0;} .btn-go:hover { background: #219150; }
+        button:disabled { background: #bdc3c7; cursor: not-allowed; }
+
+        .content { flex-grow: 1; display: flex; flex-direction: column; height: 100vh; }
+        #map { flex-grow: 1; width: 100%; }
+        .results-panel { height: 120px; background: white; border-top: 1px solid #ccc; overflow: auto; padding: 0; }
+        
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th { background: #34495e; color: white; padding: 10px; text-align: left; position: sticky; top: 0; }
+        td { padding: 8px; border-bottom: 1px solid #eee; }
+        
+        .badge { padding: 4px 8px; border-radius: 4px; color: white; font-size: 11px; font-weight: bold; }
+
+        /* Estilização customizada da TAG/Rótulo do CD */
+        .cd-tag {
+            background: #00008B !important;
+            color: white !important;
+            border: 1px solid white !important;
+            font-weight: bold !important;
+            font-size: 10px !important;
+            padding: 2px 6px !important;
+            border-radius: 4px !important;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.3) !important;
+        }
+        .cd-tag::before {
+            border-right-color: #00008B !important;
+        }
+
+        /* Classe para ocultar as tags quando o usuário desmarcar a opção */
+        .hide-cd-tags .cd-tag {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+
+<div class="sidebar">
+    <div class="header">
+        <h2 style="margin:0">Logística Geo</h2>
+        <small>Mapeamento de CDs e Clientes</small>
+    </div>
+    
+    <div class="controls">
+        <div class="control-group">
+            <h4>1. Carregar Base de Dados</h4>
+            <small style="display:block; margin-bottom:10px; color:#666;">Selecione o arquivo Excel contendo as abas "CLIENTE" e "CD".</small>
+            <input type="file" id="uploadExcel" accept=".xlsx, .xls" />
+            <small id="statusText" style="color: #27ae60;">Aguardando arquivo...</small>
+        </div>
+
+        <div class="control-group">
+            <h4>2. Visualização</h4>
+            <button class="btn-plot" id="btnPlot" disabled onclick="plotarMapa()">🗺️ Atualizar Mapa</button>
+        </div>
+
+        <div class="control-group">
+            <h4>3. Ajustes de Tela e Mapa</h4>
+            
+            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 15px; cursor: pointer;">
+                <input type="checkbox" id="toggleCDNames" onchange="toggleTags()" style="width: auto; margin: 0;">
+                Mostrar Nomes dos CDs
+            </label>
+
+            <label>Tamanho dos CDs: <span id="cdSizeLabel">8px</span></label>
+            <input type="range" id="cdRadiusSize" min="3" max="18" value="8" step="1" oninput="ajustarTamanhoCD(this.value)">
+            
+            <label>Altura da Tabela: <span id="panelHeightLabel">120px</span></label>
+            <input type="range" id="panelHeight" min="40" max="400" value="120" step="10" oninput="ajustarAlturaPainel(this.value)">
+        </div>
+
+        <div class="control-group">
+            <h4>4. Posição do Mapa</h4>
+            <label style="font-size: 0.75rem; color:#666;">Código da Localização Atual:</label>
+            <input type="text" id="mapLocationCode" readonly style="background:#e9ecef; font-family:monospace; font-size:11px; cursor:copy;" onclick="this.select(); document.execCommand('copy'); alert('Código copiado!');" title="Clique para copiar">
+            
+            <label style="font-size: 0.75rem; color:#666; margin-top:5px;">Ir para Localização (Lat, Lon, Zoom):</label>
+            <input type="text" id="inputLocationCode" placeholder="-14.235, -51.925, 4" style="font-family:monospace; font-size:11px;">
+            <button class="btn-go" onclick="aplicarLocalizacao()">📍 Ir para Localização</button>
+        </div>
+        
+        <div style="padding: 10px; background: #e8f4f8; border-radius: 8px; font-size: 12px;">
+            <strong>Legenda:</strong><br>
+            <span style="display:inline-block; width:12px; height:12px; background:#00008B; border-radius:50%; margin-right:5px; margin-top:5px;"></span> CDs (Azul Escuro)<br>
+            <span style="display:inline-block; width:12px; height:12px; background:#e74c3c; border-radius:50%; margin-right:5px; margin-top:5px;"></span> Clientes (Cores por CD)
+        </div>
+    </div>
+</div>
+
+<div class="content">
+    <div id="map" class="hide-cd-tags"></div>
+    <div class="results-panel">
+        <div id="table-output" style="padding:20px; color:#777;">Os resultados e o resumo da demanda aparecerão aqui.</div>
+    </div>
+</div>
+
+<script>
+    // --- Variáveis Globais ---
+    let globalClientes = [];
+    let globalCDs = [];
+    let globalCdRadius = 8;
+
+    // --- Configuração Inicial do Mapa ---
+    const map = L.map('map').setView([-14.235, -51.9253], 4);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+    
+    const layers = { clusters: L.layerGroup().addTo(map), centroids: L.layerGroup().addTo(map) };
+    
+    const palette = ['#e74c3c', '#2ecc71', '#9b59b6', '#f1c40f', '#e67e22', '#1abc9c', '#34495e', '#7f8c8d', '#c0392b', '#16a085', '#27ae60', '#8e44ad', '#d35400', '#f39c12', '#2c3e50'];
+
+    // --- Utilitário ---
+    const parseNum = (val) => {
+        if (val === null || val === undefined || val === '') return 0;
+        if (typeof val === 'number') return val;
+        return parseFloat(val.toString().replace(/\./g, '').replace(',', '.'));
+    };
+
+    // --- Controles de Posição do Mapa ---
+    function atualizarCodigoLocalizacao() {
+        const center = map.getCenter();
+        const zoom = map.getZoom();
+        const code = `${center.lat.toFixed(5)}, ${center.lng.toFixed(5)}, ${zoom}`;
+        document.getElementById('mapLocationCode').value = code;
+    }
+
+    // Atualiza o código na tela toda vez que o usuário interage com o mapa
+    map.on('moveend', atualizarCodigoLocalizacao);
+    map.on('zoomend', atualizarCodigoLocalizacao);
+    atualizarCodigoLocalizacao(); // Chamada inicial
+
+    function aplicarLocalizacao() {
+        const inputVal = document.getElementById('inputLocationCode').value;
+        if (!inputVal) return;
+        
+        const parts = inputVal.split(',');
+        if (parts.length >= 3) {
+            const lat = parseFloat(parts[0].trim());
+            const lng = parseFloat(parts[1].trim());
+            const zoom = parseInt(parts[2].trim());
+            
+            if (!isNaN(lat) && !isNaN(lng) && !isNaN(zoom)) {
+                map.setView([lat, lng], zoom);
+            } else {
+                alert("Formato inválido. Insira no padrão: Latitude, Longitude, Zoom");
+            }
+        } else {
+            alert("Formato inválido. Insira no padrão: Latitude, Longitude, Zoom");
+        }
+    }
+
+    // --- Controles Interativos ---
+    function ajustarTamanhoCD(valor) {
+        globalCdRadius = parseInt(valor);
+        document.getElementById('cdSizeLabel').innerText = valor + 'px';
+        layers.centroids.eachLayer(function(layer) {
+            if (layer.setRadius) layer.setRadius(globalCdRadius);
+        });
+    }
+
+    function ajustarAlturaPainel(valor) {
+        document.getElementById('panelHeightLabel').innerText = valor + 'px';
+        document.querySelector('.results-panel').style.height = valor + 'px';
+        setTimeout(() => { map.invalidateSize(); }, 50);
+    }
+
+    function toggleTags() {
+        const mapElement = document.getElementById('map');
+        if (document.getElementById('toggleCDNames').checked) {
+            mapElement.classList.remove('hide-cd-tags');
+        } else {
+            mapElement.classList.add('hide-cd-tags');
+        }
+    }
+
+    // --- Leitura do Arquivo Excel ---
+    document.getElementById('uploadExcel').addEventListener('change', function(e) {
+        const file = e.target.files[0];
+        if (!file) return;
+        
+        const reader = new FileReader();
+        reader.onload = function(event) {
+            try {
+                const wb = XLSX.read(event.target.result, { type: 'array' });
+                
+                let sheetClientes = wb.SheetNames.find(n => n.toUpperCase().includes('CLIENTE')) || wb.SheetNames[0];
+                let sheetCDs = wb.SheetNames.find(n => n.toUpperCase().includes('CD') && !n.toUpperCase().includes('CLIENTE'));
+                
+                if (!sheetCDs && wb.SheetNames.length > 1) sheetCDs = wb.SheetNames[1];
+
+                globalClientes = XLSX.utils.sheet_to_json(wb.Sheets[sheetClientes]);
+                if (sheetCDs) globalCDs = XLSX.utils.sheet_to_json(wb.Sheets[sheetCDs]);
+
+                document.getElementById('statusText').innerText = `${globalClientes.length} Clientes e ${globalCDs.length} CDs carregados.`;
+                document.getElementById('btnPlot').disabled = false;
+                
+                plotarMapa();
+            } catch (err) { 
+                alert("Erro ao ler o arquivo."); 
+                console.error(err);
+            }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+
+    // --- Plotagem ---
+    function plotarMapa() {
+        layers.clusters.clearLayers();
+        layers.centroids.clearLayers();
+
+        if (globalClientes.length === 0) return;
+
+        const cdNamesUnicos = [...new Set(globalClientes.map(c => c['CD de atendimento']))].filter(Boolean);
+        const cdColorMap = {};
+        cdNamesUnicos.forEach((cdName, index) => {
+            cdColorMap[cdName] = palette[index % palette.length];
+        });
+
+        const stats = {};
+
+        globalClientes.forEach((cliente) => {
+            const lat = parseNum(cliente.Latitude || cliente.latitude);
+            const lon = parseNum(cliente.Longitude || cliente.longitude);
+            if (!lat || !lon) return;
+
+            const cdAtendimento = cliente['CD de atendimento'] || 'Sem CD';
+            const demanda = parseNum(cliente.Demanda || cliente.demanda);
+            const corCliente = cdColorMap[cdAtendimento] || '#95a5a6';
+
+            if (!stats[cdAtendimento]) stats[cdAtendimento] = { count: 0, demanda: 0, cor: corCliente };
+            stats[cdAtendimento].count++;
+            stats[cdAtendimento].demanda += demanda;
+
+            L.circleMarker([lat, lon], { 
+                radius: 4, color: corCliente, fillColor: corCliente, fillOpacity: 0.8, weight: 1
+            })
+            .bindPopup(`<b>${cliente.Cidade || 'Cidade'} - ${cliente.UF || ''}</b><br>CD: ${cdAtendimento}<br>Demanda: ${demanda}`)
+            .addTo(layers.clusters);
+        });
+
+        globalCDs.forEach(cd => {
+            const lat = parseNum(cd.Latitude || cd.latitude || cd.lat);
+            const lon = parseNum(cd.Longitude || cd.longitude || cd.lon);
+            if (!lat || !lon) return;
+
+            const nomeCd = cd.cd || cd.CD || cd.Nome || 'CD Desconhecido';
+
+            L.circleMarker([lat, lon], { 
+                radius: globalCdRadius, color: '#ffffff', fillColor: '#00008B', fillOpacity: 1, weight: 2, zIndexOffset: 2000 
+            })
+            .bindPopup(`<b>📦 ${nomeCd}</b><br>Instalação (CD)`)
+            .bindTooltip(nomeCd, { permanent: true, direction: 'right', className: 'cd-tag', offset: [5, 0] })
+            .addTo(layers.centroids);
+        });
+
+        let htmlTabela = `<table><thead><tr><th>Centro de Distribuição</th><th>Clientes</th><th>Demanda Total</th></tr></thead><tbody>`;
+        
+        Object.keys(stats).sort().forEach(cdNome => {
+            const st = stats[cdNome];
+            htmlTabela += `<tr><td><span class="badge" style="background:${st.cor}">${cdNome}</span></td><td>${st.count}</td><td>${st.demanda.toLocaleString('pt-BR')}</td></tr>`;
+        });
+        
+        htmlTabela += `</tbody></table>`;
+        document.getElementById('table-output').innerHTML = htmlTabela;
+
+        // Ao invés de forçar o zoom nos pontos e sobrescrever a visão, 
+        // agora só enquadra automaticamente se o usuário não tiver inserido um código
+        const inputVal = document.getElementById('inputLocationCode').value;
+        if (!inputVal && globalClientes.length > 0) {
+            map.fitBounds(layers.clusters.getBounds());
+        }
+    }
+</script>
+
+</body>
+</html>
