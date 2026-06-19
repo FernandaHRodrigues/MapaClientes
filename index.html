@@ -36,9 +36,8 @@
         th { background: #34495e; color: white; padding: 10px; text-align: left; position: sticky; top: 0; }
         td { padding: 8px; border-bottom: 1px solid #eee; }
         
-        .badge { padding: 4px 8px; border-radius: 4px; color: white; font-size: 11px; font-weight: bold; }
+        .badge { padding: 4px 8px; border-radius: 4px; color: white; font-size: 11px; font-weight: bold; display: inline-block; }
 
-        /* Estilização customizada da TAG/Rótulo do CD */
         .cd-tag {
             background: #00008B !important;
             color: white !important;
@@ -53,7 +52,6 @@
             border-right-color: #00008B !important;
         }
 
-        /* Classe para ocultar as tags quando o usuário desmarcar a opção */
         .hide-cd-tags .cd-tag {
             display: none !important;
         }
@@ -106,9 +104,8 @@
         </div>
         
         <div style="padding: 10px; background: #e8f4f8; border-radius: 8px; font-size: 12px;">
-            <strong>Legenda:</strong><br>
-            <span style="display:inline-block; width:12px; height:12px; background:#00008B; border-radius:50%; margin-right:5px; margin-top:5px;"></span> CDs (Azul Escuro)<br>
-            <span style="display:inline-block; width:12px; height:12px; background:#e74c3c; border-radius:50%; margin-right:5px; margin-top:5px;"></span> Clientes (Cores por CD)
+            <strong>Dica:</strong><br>
+            Você pode alterar a cor de qualquer CD diretamente na tabela de resultados clicando no quadrado colorido ao lado do nome.
         </div>
     </div>
 </div>
@@ -125,6 +122,7 @@
     let globalClientes = [];
     let globalCDs = [];
     let globalCdRadius = 8;
+    let cdColorMap = {}; 
 
     // --- Configuração Inicial do Mapa ---
     const map = L.map('map').setView([-14.235, -51.9253], 4);
@@ -134,7 +132,29 @@
     
     const layers = { clusters: L.layerGroup().addTo(map), centroids: L.layerGroup().addTo(map) };
     
-    const palette = ['#e74c3c', '#2ecc71', '#9b59b6', '#f1c40f', '#e67e22', '#1abc9c', '#34495e', '#7f8c8d', '#c0392b', '#16a085', '#27ae60', '#8e44ad', '#d35400', '#f39c12', '#2c3e50'];
+    // Paleta focada em cores escuras e saturadas para contrastar com mapas claros
+    const strongContrastPalette = [
+        '#C00000', // Vermelho Escuro
+        '#0050A0', // Azul Forte
+        '#007A00', // Verde Forte
+        '#7030A0', // Roxo
+        '#D95319', // Laranja Queimado
+        '#008080', // Teal/Cerceta
+        '#A2142F', // Carmesim/Bordô
+        '#77AC30', // Verde Maçã Escuro
+        '#005555', // Ardósia Escura
+        '#D0A900', // Ouro/Mostarda Escuro
+        '#5C3A21', // Marrom Escuro
+        '#C71585', // Rosa Violáceo Escuro
+        '#2F4F4F', // Cinza Ardósia Escuro
+        '#4B0082', // Índigo
+        '#B8860B', // Goldenrod Escuro
+        '#1E90FF', // Dodger Blue Forte
+        '#8B0000', // Vermelho Sangue
+        '#228B22', // Verde Floresta
+        '#FF1493', // Rosa Forte
+        '#8B4513'  // Marrom Sela
+    ];
 
     // --- Utilitário ---
     const parseNum = (val) => {
@@ -142,6 +162,8 @@
         if (typeof val === 'number') return val;
         return parseFloat(val.toString().replace(/\./g, '').replace(',', '.'));
     };
+
+    const sanitizeID = (str) => str.replace(/[^a-zA-Z0-9]/g, '_');
 
     // --- Controles de Posição do Mapa ---
     function atualizarCodigoLocalizacao() {
@@ -151,29 +173,22 @@
         document.getElementById('mapLocationCode').value = code;
     }
 
-    // Atualiza o código na tela toda vez que o usuário interage com o mapa
     map.on('moveend', atualizarCodigoLocalizacao);
     map.on('zoomend', atualizarCodigoLocalizacao);
-    atualizarCodigoLocalizacao(); // Chamada inicial
+    atualizarCodigoLocalizacao();
 
     function aplicarLocalizacao() {
         const inputVal = document.getElementById('inputLocationCode').value;
         if (!inputVal) return;
-        
         const parts = inputVal.split(',');
         if (parts.length >= 3) {
             const lat = parseFloat(parts[0].trim());
             const lng = parseFloat(parts[1].trim());
             const zoom = parseInt(parts[2].trim());
-            
             if (!isNaN(lat) && !isNaN(lng) && !isNaN(zoom)) {
                 map.setView([lat, lng], zoom);
-            } else {
-                alert("Formato inválido. Insira no padrão: Latitude, Longitude, Zoom");
-            }
-        } else {
-            alert("Formato inválido. Insira no padrão: Latitude, Longitude, Zoom");
-        }
+            } else alert("Formato inválido. Insira: Lat, Lon, Zoom");
+        } else alert("Formato inválido. Insira: Lat, Lon, Zoom");
     }
 
     // --- Controles Interativos ---
@@ -200,6 +215,22 @@
         }
     }
 
+    // --- Atualização de Cor Dinâmica ---
+    function atualizarCorCD(cdNome, novaCor) {
+        cdColorMap[cdNome] = novaCor; 
+        
+        layers.clusters.eachLayer(function(layer) {
+            if (layer.options.cdName === cdNome) {
+                layer.setStyle({ color: novaCor, fillColor: novaCor });
+            }
+        });
+
+        const badge = document.getElementById(`badge-${sanitizeID(cdNome)}`);
+        if(badge) {
+            badge.style.background = novaCor;
+        }
+    }
+
     // --- Leitura do Arquivo Excel ---
     document.getElementById('uploadExcel').addEventListener('change', function(e) {
         const file = e.target.files[0];
@@ -212,7 +243,6 @@
                 
                 let sheetClientes = wb.SheetNames.find(n => n.toUpperCase().includes('CLIENTE')) || wb.SheetNames[0];
                 let sheetCDs = wb.SheetNames.find(n => n.toUpperCase().includes('CD') && !n.toUpperCase().includes('CLIENTE'));
-                
                 if (!sheetCDs && wb.SheetNames.length > 1) sheetCDs = wb.SheetNames[1];
 
                 globalClientes = XLSX.utils.sheet_to_json(wb.Sheets[sheetClientes]);
@@ -237,14 +267,67 @@
 
         if (globalClientes.length === 0) return;
 
-        const cdNamesUnicos = [...new Set(globalClientes.map(c => c['CD de atendimento']))].filter(Boolean);
-        const cdColorMap = {};
-        cdNamesUnicos.forEach((cdName, index) => {
-            cdColorMap[cdName] = palette[index % palette.length];
+        // 1. Centro de gravidade para inteligência de repetição (se necessário)
+        let cdCentroids = {};
+        globalClientes.forEach(c => {
+            const cd = c['CD de atendimento'] || 'Sem CD';
+            const lat = parseNum(c.Latitude || c.latitude);
+            const lon = parseNum(c.Longitude || c.longitude);
+            if(lat === 0 || lon === 0) return;
+            
+            if(!cdCentroids[cd]) cdCentroids[cd] = { latSum: 0, lonSum: 0, count: 0 };
+            cdCentroids[cd].latSum += lat;
+            cdCentroids[cd].lonSum += lon;
+            cdCentroids[cd].count++;
+        });
+
+        const cdNamesUnicos = Object.keys(cdCentroids);
+        cdNamesUnicos.forEach(cd => {
+            cdCentroids[cd].lat = cdCentroids[cd].latSum / cdCentroids[cd].count;
+            cdCentroids[cd].lon = cdCentroids[cd].lonSum / cdCentroids[cd].count;
+        });
+
+        // Levanta todas as cores que já estão em uso no mapa atual
+        let coresGeraisUsadas = Object.values(cdColorMap);
+
+        // 2. Regra Forte de Atribuição: Esgotar a paleta primeiro
+        cdNamesUnicos.forEach((cd) => {
+            if (!cdColorMap[cd]) {
+                // Filtra as cores que AINDA NÃO EXISTEM no mapa usando a nova paleta escura
+                let coresNuncaUsadas = strongContrastPalette.filter(c => !coresGeraisUsadas.includes(c));
+
+                if (coresNuncaUsadas.length > 0) {
+                    // Pega a primeira cor inédita e a registra como usada
+                    cdColorMap[cd] = coresNuncaUsadas[0];
+                    coresGeraisUsadas.push(coresNuncaUsadas[0]);
+                } else {
+                    // Se todas as 20 cores já estiverem no mapa, tenta pegar uma que esteja geograficamente distante
+                    let coresUsadasProximas = [];
+                    cdNamesUnicos.forEach(outroCd => {
+                        if (outroCd !== cd && cdColorMap[outroCd]) {
+                            let dLat = cdCentroids[cd].lat - cdCentroids[outroCd].lat;
+                            let dLon = cdCentroids[cd].lon - cdCentroids[outroCd].lon;
+                            if ((dLat*dLat + dLon*dLon) < 50) { 
+                                coresUsadasProximas.push(cdColorMap[outroCd]);
+                            }
+                        }
+                    });
+
+                    let coresDisponiveis = strongContrastPalette.filter(c => !coresUsadasProximas.includes(c));
+                    
+                    if (coresDisponiveis.length > 0) {
+                        cdColorMap[cd] = coresDisponiveis[0];
+                    } else {
+                        // Fallback em malhas extremamente densas
+                        cdColorMap[cd] = strongContrastPalette[Math.floor(Math.random() * strongContrastPalette.length)];
+                    }
+                }
+            }
         });
 
         const stats = {};
 
+        // 3. Plotar Clientes
         globalClientes.forEach((cliente) => {
             const lat = parseNum(cliente.Latitude || cliente.latitude);
             const lon = parseNum(cliente.Longitude || cliente.longitude);
@@ -252,19 +335,25 @@
 
             const cdAtendimento = cliente['CD de atendimento'] || 'Sem CD';
             const demanda = parseNum(cliente.Demanda || cliente.demanda);
-            const corCliente = cdColorMap[cdAtendimento] || '#95a5a6';
+            const corCliente = cdColorMap[cdAtendimento];
 
             if (!stats[cdAtendimento]) stats[cdAtendimento] = { count: 0, demanda: 0, cor: corCliente };
             stats[cdAtendimento].count++;
             stats[cdAtendimento].demanda += demanda;
 
             L.circleMarker([lat, lon], { 
-                radius: 4, color: corCliente, fillColor: corCliente, fillOpacity: 0.8, weight: 1
+                radius: 4, 
+                color: corCliente, 
+                fillColor: corCliente, 
+                fillOpacity: 0.8, 
+                weight: 1,
+                cdName: cdAtendimento 
             })
             .bindPopup(`<b>${cliente.Cidade || 'Cidade'} - ${cliente.UF || ''}</b><br>CD: ${cdAtendimento}<br>Demanda: ${demanda}`)
             .addTo(layers.clusters);
         });
 
+        // 4. Plotar CDs físicos
         globalCDs.forEach(cd => {
             const lat = parseNum(cd.Latitude || cd.latitude || cd.lat);
             const lon = parseNum(cd.Longitude || cd.longitude || cd.lon);
@@ -280,18 +369,31 @@
             .addTo(layers.centroids);
         });
 
+        // 5. Gerar Tabela com Color Picker Interativo
         let htmlTabela = `<table><thead><tr><th>Centro de Distribuição</th><th>Clientes</th><th>Demanda Total</th></tr></thead><tbody>`;
         
         Object.keys(stats).sort().forEach(cdNome => {
             const st = stats[cdNome];
-            htmlTabela += `<tr><td><span class="badge" style="background:${st.cor}">${cdNome}</span></td><td>${st.count}</td><td>${st.demanda.toLocaleString('pt-BR')}</td></tr>`;
+            const safeId = sanitizeID(cdNome);
+            
+            htmlTabela += `
+            <tr>
+                <td>
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <input type="color" value="${st.cor}" onchange="atualizarCorCD('${cdNome}', this.value)" 
+                               style="padding:0; border:none; width:22px; height:22px; cursor:pointer; background:none;" 
+                               title="Clique para alterar a cor dos clientes deste CD">
+                        <span class="badge" id="badge-${safeId}" style="background:${st.cor}">${cdNome}</span>
+                    </div>
+                </td>
+                <td>${st.count}</td>
+                <td>${st.demanda.toLocaleString('pt-BR')}</td>
+            </tr>`;
         });
         
         htmlTabela += `</tbody></table>`;
         document.getElementById('table-output').innerHTML = htmlTabela;
 
-        // Ao invés de forçar o zoom nos pontos e sobrescrever a visão, 
-        // agora só enquadra automaticamente se o usuário não tiver inserido um código
         const inputVal = document.getElementById('inputLocationCode').value;
         if (!inputVal && globalClientes.length > 0) {
             map.fitBounds(layers.clusters.getBounds());
