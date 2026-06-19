@@ -55,6 +55,14 @@
         .hide-cd-tags .cd-tag {
             display: none !important;
         }
+
+        /* Estilos do Popup Customizado */
+        .custom-popup .leaflet-popup-content { margin: 10px 15px; line-height: 1.4; }
+        .popup-hr { margin: 8px 0; border: 0; border-top: 1px solid #ddd; }
+        .popup-title { font-size: 14px; font-weight: bold; color: #2c3e50; }
+        .popup-subtitle { font-size: 11px; color: #7f8c8d; text-transform: uppercase; font-weight: 600; margin-bottom: 5px; }
+        .popup-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-size: 12px; }
+        .popup-color-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; }
     </style>
 </head>
 <body>
@@ -105,7 +113,7 @@
         
         <div style="padding: 10px; background: #e8f4f8; border-radius: 8px; font-size: 12px;">
             <strong>Dica:</strong><br>
-            Você pode alterar a cor de qualquer CD diretamente na tabela de resultados clicando no quadrado colorido ao lado do nome.
+            Clientes atendidos por mais de um CD receberão a cor do <strong>CD Principal</strong> (maior volume). Clique neles para ver a divisão!
         </div>
     </div>
 </div>
@@ -132,28 +140,11 @@
     
     const layers = { clusters: L.layerGroup().addTo(map), centroids: L.layerGroup().addTo(map) };
     
-    // Paleta focada em cores escuras e saturadas para contrastar com mapas claros
+    // Paleta focada em cores escuras e saturadas
     const strongContrastPalette = [
-        '#C00000', // Vermelho Escuro
-        '#0050A0', // Azul Forte
-        '#007A00', // Verde Forte
-        '#7030A0', // Roxo
-        '#D95319', // Laranja Queimado
-        '#008080', // Teal/Cerceta
-        '#A2142F', // Carmesim/Bordô
-        '#77AC30', // Verde Maçã Escuro
-        '#005555', // Ardósia Escura
-        '#D0A900', // Ouro/Mostarda Escuro
-        '#5C3A21', // Marrom Escuro
-        '#C71585', // Rosa Violáceo Escuro
-        '#2F4F4F', // Cinza Ardósia Escuro
-        '#4B0082', // Índigo
-        '#B8860B', // Goldenrod Escuro
-        '#1E90FF', // Dodger Blue Forte
-        '#8B0000', // Vermelho Sangue
-        '#228B22', // Verde Floresta
-        '#FF1493', // Rosa Forte
-        '#8B4513'  // Marrom Sela
+        '#C00000', '#0050A0', '#007A00', '#7030A0', '#D95319', '#008080', '#A2142F', 
+        '#77AC30', '#005555', '#D0A900', '#5C3A21', '#C71585', '#2F4F4F', '#4B0082', 
+        '#B8860B', '#1E90FF', '#8B0000', '#228B22', '#FF1493', '#8B4513'
     ];
 
     // --- Utilitário ---
@@ -220,6 +211,7 @@
         cdColorMap[cdNome] = novaCor; 
         
         layers.clusters.eachLayer(function(layer) {
+            // Atualiza os pontos se eles tiverem esse CD como o principal
             if (layer.options.cdName === cdNome) {
                 layer.setStyle({ color: novaCor, fillColor: novaCor });
             }
@@ -248,7 +240,7 @@
                 globalClientes = XLSX.utils.sheet_to_json(wb.Sheets[sheetClientes]);
                 if (sheetCDs) globalCDs = XLSX.utils.sheet_to_json(wb.Sheets[sheetCDs]);
 
-                document.getElementById('statusText').innerText = `${globalClientes.length} Clientes e ${globalCDs.length} CDs carregados.`;
+                document.getElementById('statusText').innerText = `${globalClientes.length} Linhas de Clientes e ${globalCDs.length} CDs carregados.`;
                 document.getElementById('btnPlot').disabled = false;
                 
                 plotarMapa();
@@ -267,7 +259,7 @@
 
         if (globalClientes.length === 0) return;
 
-        // 1. Centro de gravidade para inteligência de repetição (se necessário)
+        // 1. Centro de gravidade para inteligência de repetição (com base nas linhas brutas)
         let cdCentroids = {};
         globalClientes.forEach(c => {
             const cd = c['CD de atendimento'] || 'Sem CD';
@@ -287,47 +279,35 @@
             cdCentroids[cd].lon = cdCentroids[cd].lonSum / cdCentroids[cd].count;
         });
 
-        // Levanta todas as cores que já estão em uso no mapa atual
         let coresGeraisUsadas = Object.values(cdColorMap);
 
-        // 2. Regra Forte de Atribuição: Esgotar a paleta primeiro
+        // 2. Regra Forte de Atribuição de Cores
         cdNamesUnicos.forEach((cd) => {
             if (!cdColorMap[cd]) {
-                // Filtra as cores que AINDA NÃO EXISTEM no mapa usando a nova paleta escura
                 let coresNuncaUsadas = strongContrastPalette.filter(c => !coresGeraisUsadas.includes(c));
-
                 if (coresNuncaUsadas.length > 0) {
-                    // Pega a primeira cor inédita e a registra como usada
                     cdColorMap[cd] = coresNuncaUsadas[0];
                     coresGeraisUsadas.push(coresNuncaUsadas[0]);
                 } else {
-                    // Se todas as 20 cores já estiverem no mapa, tenta pegar uma que esteja geograficamente distante
                     let coresUsadasProximas = [];
                     cdNamesUnicos.forEach(outroCd => {
                         if (outroCd !== cd && cdColorMap[outroCd]) {
                             let dLat = cdCentroids[cd].lat - cdCentroids[outroCd].lat;
                             let dLon = cdCentroids[cd].lon - cdCentroids[outroCd].lon;
-                            if ((dLat*dLat + dLon*dLon) < 50) { 
-                                coresUsadasProximas.push(cdColorMap[outroCd]);
-                            }
+                            if ((dLat*dLat + dLon*dLon) < 50) coresUsadasProximas.push(cdColorMap[outroCd]);
                         }
                     });
-
                     let coresDisponiveis = strongContrastPalette.filter(c => !coresUsadasProximas.includes(c));
-                    
-                    if (coresDisponiveis.length > 0) {
-                        cdColorMap[cd] = coresDisponiveis[0];
-                    } else {
-                        // Fallback em malhas extremamente densas
-                        cdColorMap[cd] = strongContrastPalette[Math.floor(Math.random() * strongContrastPalette.length)];
-                    }
+                    if (coresDisponiveis.length > 0) cdColorMap[cd] = coresDisponiveis[0];
+                    else cdColorMap[cd] = strongContrastPalette[Math.floor(Math.random() * strongContrastPalette.length)];
                 }
             }
         });
 
         const stats = {};
+        const clientesAgrupados = {};
 
-        // 3. Plotar Clientes
+        // 3. Processar Clientes e Agrupar Coordenadas
         globalClientes.forEach((cliente) => {
             const lat = parseNum(cliente.Latitude || cliente.latitude);
             const lon = parseNum(cliente.Longitude || cliente.longitude);
@@ -337,23 +317,90 @@
             const demanda = parseNum(cliente.Demanda || cliente.demanda);
             const corCliente = cdColorMap[cdAtendimento];
 
+            // 3.1 Construir Stats para a Tabela (Baseado nas linhas puras para não perder dados)
             if (!stats[cdAtendimento]) stats[cdAtendimento] = { count: 0, demanda: 0, cor: corCliente };
-            stats[cdAtendimento].count++;
+            stats[cdAtendimento].count++; // Conta ocorrências (pedidos/linhas)
             stats[cdAtendimento].demanda += demanda;
 
-            L.circleMarker([lat, lon], { 
+            // 3.2 Agrupar geolocalização para não sobrepor pontos no mapa
+            const locKey = lat.toFixed(5) + '_' + lon.toFixed(5);
+            
+            if (!clientesAgrupados[locKey]) {
+                clientesAgrupados[locKey] = {
+                    lat: lat,
+                    lon: lon,
+                    cidade: cliente.Cidade || 'Cidade Desconhecida',
+                    uf: cliente.UF || '',
+                    cds: {}, // Dicionário { 'CD_A': 100, 'CD_B': 50 }
+                    demandaTotal: 0,
+                    cdPrincipal: null,
+                    maiorDemanda: -1
+                };
+            }
+
+            if (!clientesAgrupados[locKey].cds[cdAtendimento]) {
+                clientesAgrupados[locKey].cds[cdAtendimento] = 0;
+            }
+            
+            clientesAgrupados[locKey].cds[cdAtendimento] += demanda;
+            clientesAgrupados[locKey].demandaTotal += demanda;
+
+            // Elegendo o "CD Principal" para este ponto (Quem envia mais volume?)
+            if (clientesAgrupados[locKey].cds[cdAtendimento] > clientesAgrupados[locKey].maiorDemanda) {
+                clientesAgrupados[locKey].maiorDemanda = clientesAgrupados[locKey].cds[cdAtendimento];
+                clientesAgrupados[locKey].cdPrincipal = cdAtendimento;
+            }
+        });
+
+        // 4. Plotar Clientes Agrupados no Mapa
+        Object.values(clientesAgrupados).forEach((agrupado) => {
+            // A cor do ponto no mapa será a cor do CD que atende a MAIOR demanda ali
+            const corDoPonto = cdColorMap[agrupado.cdPrincipal];
+
+            // Construir o Popup HTML
+            let popupHTML = `<div class="custom-popup" style="min-width: 180px;">
+                <div class="popup-title">${agrupado.cidade} - ${agrupado.uf}</div>
+                <hr class="popup-hr">
+                <div class="popup-subtitle">Divisão de Demanda por CD:</div>`;
+            
+            // Ordena os CDs de quem atende mais para quem atende menos
+            const cdsOrdenados = Object.entries(agrupado.cds).sort((a, b) => b[1] - a[1]);
+            
+            cdsOrdenados.forEach(([cdNome, dem]) => {
+                const corCd = cdColorMap[cdNome] || '#999';
+                const tagPrincipal = cdNome === agrupado.cdPrincipal ? ' <b>(Principal)</b>' : '';
+                
+                popupHTML += `
+                    <div class="popup-row">
+                        <span style="display:flex; align-items:center;">
+                            <span class="popup-color-dot" style="background-color: ${corCd};"></span>
+                            <span>${cdNome}${tagPrincipal}</span>
+                        </span>
+                        <b>${dem.toLocaleString('pt-BR')}</b>
+                    </div>`;
+            });
+
+            popupHTML += `
+                <hr class="popup-hr">
+                <div class="popup-row" style="font-size: 13px;">
+                    <span><b>Demanda Total:</b></span>
+                    <b style="color: #27ae60;">${agrupado.demandaTotal.toLocaleString('pt-BR')}</b>
+                </div>
+            </div>`;
+
+            L.circleMarker([agrupado.lat, agrupado.lon], { 
                 radius: 4, 
-                color: corCliente, 
-                fillColor: corCliente, 
+                color: corDoPonto, 
+                fillColor: corDoPonto, 
                 fillOpacity: 0.8, 
                 weight: 1,
-                cdName: cdAtendimento 
+                cdName: agrupado.cdPrincipal // Usado para referenciar ao mudar a cor via tabela
             })
-            .bindPopup(`<b>${cliente.Cidade || 'Cidade'} - ${cliente.UF || ''}</b><br>CD: ${cdAtendimento}<br>Demanda: ${demanda}`)
+            .bindPopup(popupHTML)
             .addTo(layers.clusters);
         });
 
-        // 4. Plotar CDs físicos
+        // 5. Plotar CDs físicos
         globalCDs.forEach(cd => {
             const lat = parseNum(cd.Latitude || cd.latitude || cd.lat);
             const lon = parseNum(cd.Longitude || cd.longitude || cd.lon);
@@ -369,8 +416,8 @@
             .addTo(layers.centroids);
         });
 
-        // 5. Gerar Tabela com Color Picker Interativo
-        let htmlTabela = `<table><thead><tr><th>Centro de Distribuição</th><th>Clientes</th><th>Demanda Total</th></tr></thead><tbody>`;
+        // 6. Gerar Tabela
+        let htmlTabela = `<table><thead><tr><th>Centro de Distribuição</th><th>Linhas/Pedidos</th><th>Demanda Total</th></tr></thead><tbody>`;
         
         Object.keys(stats).sort().forEach(cdNome => {
             const st = stats[cdNome];
